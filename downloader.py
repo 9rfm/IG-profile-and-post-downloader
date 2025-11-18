@@ -12,7 +12,7 @@ DEVICE_ID = f"android-{str(uuid.uuid4())}"
 class downloader:
     def __init__(self):
         self.POST_COUNTER = 0
-        self.session = input("Your account session (leave blank for no session):")
+        self.session = 'shdw'
         self.username = input("username of account u want to copy:")
         urlll = f"https://i.instagram.com/api/v1/users/web_profile_info/?username={self.username}"
         response = get(urlll,headers={"User-Agent": "Instagram 390.0.0.14.102 Android (28/9; 300dpi; 1600x900; samsung; SM-N975F; SM-N975F; intel; en_US; 373310563)","Content-Type": "application/x-www-form-urlencoded; charset=UTF-8","X-Bloks-Version-Id": "54a609be99b71e070ffecba098354aa8615da5ac4ebc1e44bb7be28e5b244972",})
@@ -63,6 +63,50 @@ class downloader:
             print(f"Error downloading {url}: {e}")
             return False
 
+    def _fetch_pfp_from_html(self, username: str):
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            resp = get(f"https://www.instagram.com/{username}/", headers=headers)
+            if resp.status_code != 200:
+                return None
+            m = re.search(r'<meta property="og:image" content="([^"]+)"', resp.text)
+            return m.group(1) if m else None
+        except Exception:
+            return None
+
+    def _download_profile_picture(self, user_obj: dict, profile_dir: Path, primary_headers: dict):
+        pfp_url = None
+        if user_obj:
+            pfp_url = (
+                user_obj.get("profile_pic_url_hd")
+                or (user_obj.get("hd_profile_pic_url_info", {}) or {}).get("url")
+                or user_obj.get("profile_pic_url")
+            )
+        if not pfp_url:
+            pfp_url = self._fetch_pfp_from_html(self.username)
+            print(pfp_url)
+        if not pfp_url:
+            print("Profile picture URL not available.")
+            return False
+        browser_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"https://www.instagram.com/{self.username}/",
+        }
+        dest = profile_dir / "profile_picture.jpg"
+        if self._download_url(pfp_url, dest, primary_headers):
+            print("Downloaded profile picture.")
+            return True
+        if self._download_url(pfp_url, dest, browser_headers):
+            print("Downloaded profile picture via fallback headers.")
+            return True
+        print("Failed to download profile picture.")
+        return False
+
     def download_account_assets(self):
         target = self.username
         base = Path.cwd() / target
@@ -84,12 +128,7 @@ class downloader:
             return
         profile_dir = base / "profile"
         (profile_dir / "info.json").write_text(json.dumps(user_obj, ensure_ascii=False, indent=2), encoding="utf-8")
-        pfp_url = user_obj.get("profile_pic_url_hd") or user_obj.get("profile_pic_url")
-        if pfp_url:
-            self._download_url(pfp_url, profile_dir / "profile_picture.jpg", ua)
-            print("Downloaded profile picture and info.")
-        else:
-            print("Profile picture URL not available.")
+        self._download_profile_picture(user_obj, profile_dir, ua)
 
         max_id = None
         total_downloaded = 0
@@ -193,9 +232,10 @@ class downloader:
         profile_dir = base / "profile"
         if user_obj:
             (profile_dir / "info.json").write_text(json.dumps(user_obj, ensure_ascii=False, indent=2), encoding="utf-8")
-            pfp_url = user_obj.get("profile_pic_url_hd") or user_obj.get("profile_pic_url")
-            if pfp_url:
-                self._download_url(pfp_url, profile_dir / "profile_picture.jpg", ua)
+            self._download_profile_picture(user_obj, profile_dir, ua)
+        else:
+            # Attempt HTML fallback to still get pfp
+            self._download_profile_picture(None, profile_dir, ua)
         max_id = None
         total_downloaded = 0
         while True:
